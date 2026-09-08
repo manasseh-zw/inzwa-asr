@@ -1,0 +1,23 @@
+name: inzwa-manifest-preflight
+
+resources:
+  cloud: aws
+  region: us-east-1
+  instance_type: m6i.xlarge
+  disk_size: 50
+
+workdir: .
+
+envs:
+  AWS_REGION: us-east-1
+  RELEASE_ROOT: /tmp/inzwa-release-v2
+
+setup: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env"
+  uv sync --frozen
+
+run: |
+  source "$HOME/.local/bin/env"
+  uv run inzwa-release hydrate "$RELEASE_ROOT" --manifest-only
+  uv run inzwa-release verify "$RELEASE_ROOT" --manifest-only

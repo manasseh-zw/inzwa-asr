@@ -8,3 +8,16 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local research notes and agent handovers
+.docs/
+
+# Local credentials, releases, and training outputs
+.env
+.env.*
+!.env.example
+data/
+outputs/
+*.ckpt
+*.nemo
+*.pt
