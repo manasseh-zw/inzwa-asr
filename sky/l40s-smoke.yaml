@@ -13,8 +13,8 @@ envs:
   AWS_REGION: us-east-1
   PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
   RELEASE_ROOT: /data/inzwa-release-v2
-  RUN_ID: full-corpus-v2-smoke
-  S3_OUTPUT_PREFIX: s3://YOUR-BUCKET/asr/inzwa/runs/full-corpus-v2-smoke
+  RUN_ID: full-corpus-v2-smoke-20260909a
+  S3_OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/runs/full-corpus-v2-smoke-20260909a
 
 setup: |
   curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -23,11 +23,12 @@ setup: |
 
 run: |
   source "$HOME/.local/bin/env"
+  uv run inzwa-release hydrate "$RELEASE_ROOT"
   uv run inzwa-release verify "$RELEASE_ROOT"
   uv run inzwa-preflight "$RELEASE_ROOT" --no-hydrate-audio --report preflight.json
   uv run inzwa-train \
     --release-root "$RELEASE_ROOT" \
-    --output-dir "/tmp/$RUN_ID" \
+    --output-dir "/data/$RUN_ID" \
     --run-id "$RUN_ID" \
     --output-prefix "$S3_OUTPUT_PREFIX" \
     --max-epochs 1 \
