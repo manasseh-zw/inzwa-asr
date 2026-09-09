@@ -31,4 +31,5 @@ run: |
     --release-root "$RELEASE_ROOT" \
     --output-dir "/data/$RUN_ID" \
     --run-id "$RUN_ID" \
-    --output-prefix "$S3_OUTPUT_PREFIX"
+    --output-prefix "$S3_OUTPUT_PREFIX" \
+    --reuse-prepared-output
