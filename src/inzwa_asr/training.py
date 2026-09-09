@@ -78,6 +78,20 @@ def _disable_cuda_graphs(model: Any) -> None:
         strategy.use_cuda_graph_decoder = False
 
 
+def _scalar(value: Any) -> float | None:
+    if value is None:
+        return None
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().item()
+    return float(value)
+
+
+def _learning_rate(trainer: Any) -> float | None:
+    if not trainer.optimizers:
+        return None
+    return float(trainer.optimizers[0].param_groups[0]["lr"])
+
+
 def _resolve_model(model_id: str, revision: str, cache: Path) -> tuple[Path, str]:
     from huggingface_hub import HfApi, snapshot_download
 
@@ -148,6 +162,9 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 "Refusing to reuse an output directory that contains run artifacts"
             )
     config.output_dir.mkdir(parents=True, exist_ok=config.reuse_prepared_output)
+
+    # Comet must initialize before Torch/Lightning for framework telemetry.
+    __import__("comet_ml")
 
     import lightning.pytorch as pl
     import nemo.collections.asr as nemo_asr
@@ -266,12 +283,36 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 config.early_stopping_patience_epochs * self.steps_per_epoch
             )
 
+        def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+            self._validate(trainer, pl_module, include_bible=True, stage="base")
+
         def on_train_epoch_start(self, trainer: Any, pl_module: Any) -> None:
             sampler.set_epoch(trainer.current_epoch)
 
         def on_train_batch_end(
             self, trainer: Any, pl_module: Any, outputs: Any, batch: Any, batch_idx: int
         ) -> None:
+            if trainer.global_step and trainer.global_step % 25 == 0:
+                loss = None
+                if isinstance(outputs, dict):
+                    loss = outputs.get("loss")
+                if loss is None:
+                    loss = trainer.callback_metrics.get("train_loss")
+                metrics = {
+                    "training/loss": _scalar(loss),
+                    "training/learning_rate": _learning_rate(trainer),
+                    "training/epoch": float(trainer.current_epoch),
+                    "training/gpu_memory_allocated_gib": (
+                        torch.cuda.memory_allocated() / 1024**3
+                    ),
+                    "training/gpu_memory_reserved_gib": (
+                        torch.cuda.memory_reserved() / 1024**3
+                    ),
+                }
+                comet.log_metrics(
+                    {key: value for key, value in metrics.items() if value is not None},
+                    step=trainer.global_step,
+                )
             if (
                 trainer.global_step
                 and trainer.global_step % config.exposure_interval == 0
@@ -288,16 +329,26 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 include_bible = (
                     trainer.global_step % config.bible_validation_interval_steps == 0
                 )
-                self._validate(trainer, pl_module, include_bible=include_bible)
+                self._validate(
+                    trainer, pl_module, include_bible=include_bible, stage="periodic"
+                )
 
         def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
             if trainer.global_step != self.last_validation_step:
-                self._validate(trainer, pl_module, include_bible=True)
+                self._validate(
+                    trainer, pl_module, include_bible=True, stage="epoch_end"
+                )
 
         def _validate(
-            self, trainer: Any, pl_module: Any, *, include_bible: bool
+            self,
+            trainer: Any,
+            pl_module: Any,
+            *,
+            include_bible: bool,
+            stage: str,
         ) -> None:
             _disable_prediction_logging(pl_module)
+            was_training = pl_module.training
             names = ["waxal", "fleurs"]
             if include_bible:
                 names.append("bible")
@@ -312,6 +363,8 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 )
                 for name in names
             }
+            if was_training:
+                pl_module.train()
             metrics = {
                 f"validation/{name}/{metric}": value
                 for name, result in results.items()
@@ -329,6 +382,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
                     json.dumps(
                         {
                             "step": trainer.global_step,
+                            "stage": stage,
                             "selection_wer": selection,
                             "datasets": results,
                         }
