@@ -35,4 +35,5 @@ run: |
     --max-epochs 1 \
     --limit-train-batches 20 \
     --validation-limit 8 \
+    --exposure-interval 10 \
     --reuse-prepared-output

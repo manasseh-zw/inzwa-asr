@@ -57,6 +57,8 @@ def _git_commit() -> str:
 
 
 def _disable_prediction_logging(model: Any) -> None:
+    if "log_prediction" in model.cfg:
+        model.cfg["log_prediction"] = False
     for metric_name in ("wer", "validation_wer", "test_wer"):
         metric = getattr(model, metric_name, None)
         if metric is not None and hasattr(metric, "log_prediction"):
