@@ -46,6 +46,7 @@ class TrainConfig:
     exposure_interval: int = 1000
     limit_train_batches: int | None = None
     validation_limit: int | None = None
+    reuse_prepared_output: bool = False
 
 
 def _git_commit() -> str:
@@ -62,7 +63,7 @@ def _disable_prediction_logging(model: Any) -> None:
             metric.log_prediction = False
     for config_name in ("validation_ds", "test_ds"):
         config = getattr(model.cfg, config_name, None)
-        if config is not None:
+        if config is not None and "log_prediction" in config:
             config["log_prediction"] = False
 
 
@@ -131,9 +132,20 @@ def train(config: TrainConfig) -> dict[str, Any]:
     release = verify_release(config.release_root, require_complete=True)
     if not release["train_ready"]:
         raise RuntimeError("The full release did not pass verification")
-    if config.output_dir.exists():
+    if config.output_dir.exists() and not config.reuse_prepared_output:
         raise RuntimeError(f"Output directory already exists: {config.output_dir}")
-    config.output_dir.mkdir(parents=True)
+    if config.output_dir.exists():
+        completed_markers = [
+            config.output_dir / "best-weights.pt",
+            config.output_dir / "config.json",
+            config.output_dir / "summary.json",
+            config.output_dir / "inzwa-parakeet-tdt-0.6b-v3.nemo",
+        ]
+        if any(path.exists() for path in completed_markers):
+            raise RuntimeError(
+                "Refusing to reuse an output directory that contains run artifacts"
+            )
+    config.output_dir.mkdir(parents=True, exist_ok=config.reuse_prepared_output)
 
     import lightning.pytorch as pl
     import nemo.collections.asr as nemo_asr
@@ -398,6 +410,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--exposure-interval", type=int, default=1000)
     result.add_argument("--limit-train-batches", type=int)
     result.add_argument("--validation-limit", type=int)
+    result.add_argument("--reuse-prepared-output", action="store_true")
     return result
 
 

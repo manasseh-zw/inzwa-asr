@@ -34,4 +34,5 @@ run: |
     --output-prefix "$S3_OUTPUT_PREFIX" \
     --max-epochs 1 \
     --limit-train-batches 20 \
-    --validation-limit 8
+    --validation-limit 8 \
+    --reuse-prepared-output
