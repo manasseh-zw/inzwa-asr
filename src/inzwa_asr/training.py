@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import re
@@ -47,6 +48,11 @@ class TrainConfig:
     limit_train_batches: int | None = None
     validation_limit: int | None = None
     reuse_prepared_output: bool = False
+    initial_model_uri: str | None = None
+    initial_model_sha256: str | None = None
+    train_source: str | None = None
+    selection_objective: str = "mean"
+    max_steps: int = -1
 
 
 def _git_commit() -> str:
@@ -54,6 +60,21 @@ def _git_commit() -> str:
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     )
     return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+def _load_comet_env() -> None:
+    configured = os.environ.get("COMET_API_KEY_FILE")
+    if not configured:
+        return
+    path = Path(configured).expanduser()
+    if not path.is_file():
+        raise RuntimeError(f"COMET_API_KEY_FILE does not exist: {path}")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "COMET_API_KEY":
+            os.environ.setdefault("COMET_API_KEY", value.strip().strip("'\""))
+    if not os.environ.get("COMET_API_KEY"):
+        raise RuntimeError(f"COMET_API_KEY is missing from {path}")
 
 
 def _disable_prediction_logging(model: Any) -> None:
@@ -105,6 +126,33 @@ def _resolve_model(model_id: str, revision: str, cache: Path) -> tuple[Path, str
     return candidates[0], resolved
 
 
+def _resolve_initial_model(config: TrainConfig) -> tuple[Path, str]:
+    if config.initial_model_uri is None:
+        return _resolve_model(
+            config.model_id, config.model_revision, config.output_dir / "model-cache"
+        )
+    if not config.initial_model_sha256:
+        raise ValueError("initial_model_sha256 is required with initial_model_uri")
+    import boto3
+
+    from .release import parse_s3_uri
+
+    bucket, key = parse_s3_uri(config.initial_model_uri)
+    path = config.output_dir / "model-cache" / "initial.nemo"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file():
+        boto3.client(
+            "s3", region_name=os.environ.get("AWS_REGION", "us-east-1")
+        ).download_file(bucket, key, str(path))
+    actual = file_sha256(path)
+    if actual != config.initial_model_sha256:
+        raise RuntimeError(
+            f"Initial model checksum mismatch: expected {config.initial_model_sha256}, "
+            f"got {actual}"
+        )
+    return path, config.initial_model_sha256
+
+
 def _upload_artifacts(output_dir: Path, s3_uri: str) -> list[str]:
     import boto3
 
@@ -145,9 +193,17 @@ def train(config: TrainConfig) -> dict[str, Any]:
         )
     if config.early_stopping_min_delta < 0:
         raise ValueError("early_stopping_min_delta must not be negative")
+    if config.selection_objective not in {"mean", "fleurs"}:
+        raise ValueError("selection_objective must be 'mean' or 'fleurs'")
     release = verify_release(config.release_root, require_complete=True)
     if not release["train_ready"]:
         raise RuntimeError("The full release did not pass verification")
+    # Validate the immutable release before applying an adaptation-only source
+    # filter.  validate_training_rows() intentionally enforces the complete
+    # four-source release contract.
+    validate_training_rows(
+        read_manifest(config.release_root / "manifests" / "train.jsonl.gz")
+    )
     if config.output_dir.exists() and not config.reuse_prepared_output:
         raise RuntimeError(f"Output directory already exists: {config.output_dir}")
     if config.output_dir.exists():
@@ -164,6 +220,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
     config.output_dir.mkdir(parents=True, exist_ok=config.reuse_prepared_output)
 
     # Comet must initialize before Torch/Lightning for framework telemetry.
+    _load_comet_env()
     __import__("comet_ml")
 
     import lightning.pytorch as pl
@@ -178,9 +235,19 @@ def train(config: TrainConfig) -> dict[str, Any]:
         config.release_root,
         config.output_dir / "materialized",
         release_verified=True,
+        train_source=config.train_source,
     )
     train_rows = read_manifest(manifests["train"])
-    validate_training_rows(train_rows)
+    if config.train_source:
+        unexpected_sources = sorted(
+            {str(row["source"]) for row in train_rows}
+            - {config.train_source}
+        )
+        if unexpected_sources:
+            raise RuntimeError(
+                "Source-filtered manifest contains unexpected sources: "
+                f"{unexpected_sources}"
+            )
     sampler = DurationBatchSampler(
         train_rows,
         max_batch_duration=config.max_batch_duration,
@@ -188,9 +255,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
         seed=config.seed,
         sort_window=config.sort_window,
     )
-    model_path, resolved_revision = _resolve_model(
-        config.model_id, config.model_revision, config.output_dir / "model-cache"
-    )
+    model_path, resolved_revision = _resolve_initial_model(config)
     model = nemo_asr.models.ASRModel.restore_from(str(model_path), map_location="cpu")
     _disable_cuda_graphs(model)
     _disable_prediction_logging(model)
@@ -243,6 +308,8 @@ def train(config: TrainConfig) -> dict[str, Any]:
         "dataset_format": release["format_version"],
         "model_id": config.model_id,
         "model_revision": resolved_revision,
+        "initial_model_uri": config.initial_model_uri,
+        "initial_model_sha256": config.initial_model_sha256,
         "seed": config.seed,
         "sampler": {
             "type": "deterministic-sortish-duration-batching",
@@ -250,6 +317,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
             "max_batch_size": config.batch_size,
             "sort_window": config.sort_window,
             "natural_mixture": True,
+            "train_source": config.train_source,
         },
         "validation": {
             "selection_datasets": ["waxal", "fleurs"],
@@ -257,6 +325,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
             "selection_interval_steps": config.validation_interval_steps,
             "bible_interval_steps": config.bible_validation_interval_steps,
             "limit_per_dataset": config.validation_limit,
+            "selection_objective": config.selection_objective,
         },
         "early_stopping": {
             "patience_epoch_equivalents": config.early_stopping_patience_epochs,
@@ -274,6 +343,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
     class ExperimentCallback(pl.Callback):
         def __init__(self) -> None:
             self.best_score = float("inf")
+            self.best_step = -1
             self.meaningful_best = float("inf")
             self.last_meaningful_step = 0
             self.last_validation_step = -1
@@ -371,8 +441,14 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 for metric, value in result["metrics"].items()
             }
             selection = (
-                results["waxal"]["metrics"]["wer"] + results["fleurs"]["metrics"]["wer"]
-            ) / 2
+                results["fleurs"]["metrics"]["wer"]
+                if config.selection_objective == "fleurs"
+                else (
+                    results["waxal"]["metrics"]["wer"]
+                    + results["fleurs"]["metrics"]["wer"]
+                )
+                / 2
+            )
             metrics["validation/selection_wer"] = selection
             comet.log_metrics(metrics, step=trainer.global_step)
             with (config.output_dir / "validation-history.jsonl").open(
@@ -391,11 +467,11 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 )
             if selection < self.best_score:
                 self.best_score = selection
-                state = {
-                    key: value.detach().cpu()
-                    for key, value in pl_module.state_dict().items()
-                }
-                torch.save(state, self.best_path)
+                self.best_step = trainer.global_step
+                # torch.save serializes each existing device storage directly.
+                # Building a detached CPU state dict here retains another ~2.5
+                # GiB allocation on a 16 GiB g5.xlarge after every new best.
+                torch.save(pl_module.state_dict(), self.best_path)
             if selection <= self.meaningful_best - config.early_stopping_min_delta:
                 self.meaningful_best = selection
                 self.last_meaningful_step = trainer.global_step
@@ -409,6 +485,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
         devices=1,
         precision="bf16-mixed",
         max_epochs=config.max_epochs,
+        max_steps=config.max_steps,
         gradient_clip_val=1.0,
         logger=comet,
         callbacks=[callback],
@@ -420,15 +497,20 @@ def train(config: TrainConfig) -> dict[str, Any]:
     trainer.fit(model, train_dataloaders=train_loader)
     if not callback.best_path.is_file():
         raise RuntimeError("Training finished without a best weights checkpoint")
-    model.load_state_dict(
-        torch.load(callback.best_path, map_location="cpu", weights_only=True)
-    )
+    if callback.best_step != trainer.global_step:
+        best_state = torch.load(
+            callback.best_path, map_location="cpu", weights_only=True
+        )
+        model.load_state_dict(best_state)
+        del best_state
+        gc.collect()
     final_model = config.output_dir / "inzwa-parakeet-tdt-0.6b-v3.nemo"
     model.save_to(str(final_model))
     summary = {
         "status": "complete",
         **provenance,
         "best_selection_wer": callback.best_score,
+        "selected_step": callback.best_step,
         "best_weights": {
             "path": str(callback.best_path),
             "sha256": file_sha256(callback.best_path),
@@ -467,6 +549,13 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--limit-train-batches", type=int)
     result.add_argument("--validation-limit", type=int)
     result.add_argument("--reuse-prepared-output", action="store_true")
+    result.add_argument("--initial-model-uri")
+    result.add_argument("--initial-model-sha256")
+    result.add_argument("--train-source")
+    result.add_argument(
+        "--selection-objective", choices=("mean", "fleurs"), default="mean"
+    )
+    result.add_argument("--max-steps", type=int, default=-1)
     return result
 
 

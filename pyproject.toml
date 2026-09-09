@@ -12,6 +12,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+data = [
+    "huggingface-hub>=0.27,<2",
+    "pyarrow>=18,<20",
+]
 train = [
     "comet-ml>=3.47,<4",
     "jiwer>=3.1,<4",
@@ -19,6 +23,7 @@ train = [
     "huggingface-hub>=0.27,<1",
     "nemo-toolkit[asr]>=2.4,<3",
     "numba-cuda[cu12]==0.15.1",
+    "pyarrow>=18,<20",
 ]
 
 [dependency-groups]
@@ -31,6 +36,7 @@ dev = [
 inzwa-release = "inzwa_asr.release:main"
 inzwa-preflight = "inzwa_asr.preflight:main"
 inzwa-train = "inzwa_asr.training:main"
+inzwa-evaluate = "inzwa_asr.test_evaluation:main"
 
 [build-system]
 requires = ["hatchling"]

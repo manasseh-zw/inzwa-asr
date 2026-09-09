@@ -7,7 +7,26 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from .manifests import read_manifest
+
+def read_evaluation_manifest(path: Path) -> list[dict[str, Any]]:
+    """Read the deliberately smaller inference-only manifest contract."""
+    rows = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            missing = {"id", "audio_filepath", "text"} - row.keys()
+            if missing:
+                raise ValueError(f"Missing {sorted(missing)} at {path}:{line_number}")
+            if not Path(str(row["audio_filepath"])).is_file():
+                raise FileNotFoundError(
+                    f"Missing audio at {path}:{line_number}: {row['audio_filepath']}"
+                )
+            rows.append(row)
+    if not rows:
+        raise ValueError(f"Evaluation manifest is empty: {path}")
+    return rows
 
 
 def normalize_text(text: str) -> str:
@@ -40,7 +59,7 @@ def evaluate_manifest(
     output_dir: Path,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    rows = read_manifest(manifest)
+    rows = read_evaluation_manifest(manifest)
     if limit is not None:
         if limit < 1:
             raise ValueError("validation limit must be positive")

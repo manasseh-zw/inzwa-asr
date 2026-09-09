@@ -1,0 +1,31 @@
+name: inzwa-a10g-test-evaluation
+
+resources:
+  cloud: aws
+  region: us-east-1
+  instance_type: g5.xlarge
+  accelerators: A10G:1
+  disk_size: 100
+
+workdir: .
+
+envs:
+  AWS_REGION: us-east-1
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  MODEL_URI: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/runs/full-corpus-v2-seed42-20260909a/inzwa-parakeet-tdt-0.6b-v3.nemo
+  OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/evaluations/full-corpus-v2-seed42-20260909a/full-test-v1
+
+setup: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env"
+  uv sync --frozen --extra train
+  uv run python -c "import nemo.collections.asr; import pyarrow"
+
+run: |
+  source "$HOME/.local/bin/env"
+  uv run python -c "from pathlib import Path; import boto3; path=Path.home() / 'inzwa-test-v1'; path.mkdir(parents=True, exist_ok=True); print({'work_root': str(path), 'aws_account': boto3.client('sts').get_caller_identity()['Account']})"
+  uv run inzwa-evaluate \
+    --model-uri "$MODEL_URI" \
+    --work-root "$HOME/inzwa-test-v1" \
+    --output-prefix "$OUTPUT_PREFIX" \
+    --batch-size 16

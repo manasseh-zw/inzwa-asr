@@ -1,0 +1,46 @@
+name: inzwa-fleurs-adaptation-smoke
+
+resources:
+  cloud: aws
+  region: us-east-1
+  instance_type: g6e.xlarge
+  accelerators: L40S:1
+  disk_size: 250
+
+workdir: .
+
+envs:
+  AWS_REGION: us-east-1
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  RELEASE_ROOT: /data/inzwa-release-v2
+  RUN_ID: fleurs-adaptation-smoke-20260909a
+  S3_OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/adaptation/fleurs-adaptation-smoke-20260909a
+  INITIAL_MODEL_URI: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/runs/full-corpus-v2-seed42-20260909a/inzwa-parakeet-tdt-0.6b-v3.nemo
+  INITIAL_MODEL_SHA256: 08bb22eb1050f165529c25d9306c45679b10e54a9b6c568a113e33622b3a8da1
+
+setup: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env"
+  uv sync --frozen --extra train
+  uv run python -c "import nemo.collections.asr; import numba; import numpy"
+
+run: |
+  source "$HOME/.local/bin/env"
+  test -w /data
+  uv run inzwa-release verify "$RELEASE_ROOT"
+  uv run inzwa-train \
+    --release-root "$RELEASE_ROOT" \
+    --output-dir "/data/$RUN_ID" \
+    --run-id "$RUN_ID" \
+    --output-prefix "$S3_OUTPUT_PREFIX" \
+    --initial-model-uri "$INITIAL_MODEL_URI" \
+    --initial-model-sha256 "$INITIAL_MODEL_SHA256" \
+    --train-source fleurs \
+    --selection-objective fleurs \
+    --learning-rate 3e-6 \
+    --batch-size 2 \
+    --max-steps 10 \
+    --validation-interval-steps 5 \
+    --bible-validation-interval-steps 10 \
+    --validation-limit 32 \
+    --reuse-prepared-output

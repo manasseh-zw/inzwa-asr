@@ -45,7 +45,11 @@ def _write_nemo_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def materialize_nemo_manifests(
-    root: Path, destination: Path, *, release_verified: bool = False
+    root: Path,
+    destination: Path,
+    *,
+    release_verified: bool = False,
+    train_source: str | None = None,
 ) -> dict[str, Path]:
     if not release_verified:
         verify_release(root, require_complete=True)
@@ -55,6 +59,12 @@ def materialize_nemo_manifests(
     manifests = {"train": "manifests/train.jsonl.gz", **VALIDATION_MANIFESTS}
     for name, relative in manifests.items():
         rows = read_manifest(root / relative)
+        if name == "train" and train_source:
+            rows = [row for row in rows if str(row["source"]) == train_source]
+            if not rows:
+                raise ReleaseError(
+                    f"No training rows found for source {train_source!r}"
+                )
         _extract_rows(root, rows, audio_root)
         output = destination / f"{name}.jsonl"
         _write_nemo_manifest(output, rows)

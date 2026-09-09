@@ -1,0 +1,63 @@
+name: inzwa-a10g-fleurs-adaptation-smoke
+
+file_mounts:
+  /home/ubuntu/.config/teleagents/comet.env: ../../shona-speech/src/asr/04_omniasr_ctc_1b_v2/.env.comet
+
+resources:
+  cloud: aws
+  region: us-east-1
+  instance_type: g5.xlarge
+  accelerators: A10G:1
+  disk_size: 100
+
+workdir: .
+
+envs:
+  AWS_REGION: us-east-1
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  COMET_API_KEY_FILE: /home/ubuntu/.config/teleagents/comet.env
+  COMET_PROJECT_NAME: inzwa-asr
+  RELEASE_ROOT: /home/ubuntu/inzwa-release-v2
+  RUN_ID: fleurs-adaptation-smoke-20260909b
+  S3_OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/adaptation/fleurs-adaptation-smoke-20260909b
+  INITIAL_MODEL_URI: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/runs/full-corpus-v2-seed42-20260909a/inzwa-parakeet-tdt-0.6b-v3.nemo
+  INITIAL_MODEL_SHA256: 08bb22eb1050f165529c25d9306c45679b10e54a9b6c568a113e33622b3a8da1
+
+setup: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env"
+  uv sync --frozen --extra train
+  uv run python -c "import nemo.collections.asr; import numba; import numpy"
+
+run: |
+  source "$HOME/.local/bin/env"
+  test -w "$HOME"
+  mkdir -p "$HOME/job-logs"
+  JOB_LOG="$HOME/job-logs/$RUN_ID.log"
+  JOB_LOG_URI="$S3_OUTPUT_PREFIX/job.log"
+  export JOB_LOG JOB_LOG_URI
+  : > "$JOB_LOG"
+  exec > >(tee "$JOB_LOG") 2>&1
+  upload_job_log() {
+    status=$?
+    uv run python -c 'import os; import boto3; from inzwa_asr.release import parse_s3_uri; bucket, key = parse_s3_uri(os.environ["JOB_LOG_URI"]); boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1")).upload_file(os.environ["JOB_LOG"], bucket, key)' || true
+    exit "$status"
+  }
+  trap upload_job_log EXIT
+  uv run inzwa-release hydrate "$RELEASE_ROOT"
+  uv run inzwa-release verify "$RELEASE_ROOT"
+  uv run inzwa-train \
+    --release-root "$RELEASE_ROOT" \
+    --output-dir "$HOME/runs/$RUN_ID" \
+    --run-id "$RUN_ID" \
+    --output-prefix "$S3_OUTPUT_PREFIX" \
+    --initial-model-uri "$INITIAL_MODEL_URI" \
+    --initial-model-sha256 "$INITIAL_MODEL_SHA256" \
+    --train-source fleurs \
+    --selection-objective fleurs \
+    --learning-rate 3e-6 \
+    --batch-size 1 \
+    --max-steps 10 \
+    --validation-interval-steps 5 \
+    --bible-validation-interval-steps 10 \
+    --validation-limit 32
