@@ -70,7 +70,9 @@ uv run inzwa-release verify /data/inzwa-full-v2
 Install the GPU dependencies with `uv sync --extra train`. The baseline uses
 deterministic duration-aware batches and visits every row once per epoch. The
 safe L40S fallback is two examples per batch. Source and pseudo-tier exposure is
-sent to Comet every 1,000 steps through Lightning's `CometLogger`.
+sent to Comet every 1,000 steps through Lightning's `CometLogger`. WAXAL and
+FLEURS validation runs every 2,000 steps. Bible validation runs every 10,000
+steps and at epoch end.
 
 ```bash
 export COMET_API_KEY=...
@@ -97,7 +99,9 @@ must be replaced first.
 Validation reports raw WER plus punctuation-insensitive WER and CER. The latter
 uses Unicode NFKC, case folding, punctuation-to-space replacement, and
 whitespace collapse. WAXAL and FLEURS WER have equal weight in the selection
-score. Bible results are logged but cannot change the selected checkpoint.
+score. Bible results are logged but cannot change the selected checkpoint. The
+early stopper requires a 0.001 absolute WER improvement and waits two full
+epoch-equivalents without such an improvement. The hard limit is 10 epochs.
 
 Final test evaluation is deliberately outside the training command. This keeps
 test and private data out of checkpoint selection.

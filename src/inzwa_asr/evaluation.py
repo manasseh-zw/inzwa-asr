@@ -32,9 +32,19 @@ def score(references: list[str], hypotheses: list[str]) -> dict[str, float]:
 
 
 def evaluate_manifest(
-    model: Any, manifest: Path, *, name: str, batch_size: int, output_dir: Path
+    model: Any,
+    manifest: Path,
+    *,
+    name: str,
+    batch_size: int,
+    output_dir: Path,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     rows = read_manifest(manifest)
+    if limit is not None:
+        if limit < 1:
+            raise ValueError("validation limit must be positive")
+        rows = rows[:limit]
     paths = [str(row["audio_filepath"]) for row in rows]
     hypotheses = model.transcribe(paths, batch_size=batch_size, verbose=False)
     texts = [

@@ -31,4 +31,5 @@ run: |
     --run-id "$RUN_ID" \
     --output-prefix "$S3_OUTPUT_PREFIX" \
     --max-epochs 1 \
-    --limit-train-batches 20
+    --limit-train-batches 20 \
+    --validation-limit 8

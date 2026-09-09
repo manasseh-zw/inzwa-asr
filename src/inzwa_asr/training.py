@@ -39,9 +39,13 @@ class TrainConfig:
     warmup_ratio: float = 0.1
     num_workers: int = 2
     validation_batch_size: int = 16
-    early_stopping_patience: int = 2
+    validation_interval_steps: int = 2000
+    bible_validation_interval_steps: int = 10_000
+    early_stopping_patience_epochs: int = 2
+    early_stopping_min_delta: float = 0.001
     exposure_interval: int = 1000
     limit_train_batches: int | None = None
+    validation_limit: int | None = None
 
 
 def _git_commit() -> str:
@@ -110,6 +114,20 @@ def train(config: TrainConfig) -> dict[str, Any]:
         raise ValueError("output_prefix must be versioned and end with run_id")
     if config.batch_size < 1 or config.max_batch_duration <= 0:
         raise ValueError("batch_size and max_batch_duration must be positive")
+    if (
+        min(
+            config.validation_interval_steps,
+            config.bible_validation_interval_steps,
+            config.early_stopping_patience_epochs,
+            config.exposure_interval,
+        )
+        < 1
+    ):
+        raise ValueError(
+            "validation, patience, and telemetry intervals must be positive"
+        )
+    if config.early_stopping_min_delta < 0:
+        raise ValueError("early_stopping_min_delta must not be negative")
     release = verify_release(config.release_root, require_complete=True)
     if not release["train_ready"]:
         raise RuntimeError("The full release did not pass verification")
@@ -202,6 +220,17 @@ def train(config: TrainConfig) -> dict[str, Any]:
             "sort_window": config.sort_window,
             "natural_mixture": True,
         },
+        "validation": {
+            "selection_datasets": ["waxal", "fleurs"],
+            "diagnostic_dataset": "bible",
+            "selection_interval_steps": config.validation_interval_steps,
+            "bible_interval_steps": config.bible_validation_interval_steps,
+            "limit_per_dataset": config.validation_limit,
+        },
+        "early_stopping": {
+            "patience_epoch_equivalents": config.early_stopping_patience_epochs,
+            "min_delta_wer": config.early_stopping_min_delta,
+        },
         "output_prefix": config.output_prefix,
         "created_at": datetime.now(UTC).isoformat(),
     }
@@ -214,8 +243,14 @@ def train(config: TrainConfig) -> dict[str, Any]:
     class ExperimentCallback(pl.Callback):
         def __init__(self) -> None:
             self.best_score = float("inf")
-            self.bad_epochs = 0
+            self.meaningful_best = float("inf")
+            self.last_meaningful_step = 0
+            self.last_validation_step = -1
             self.best_path = config.output_dir / "best-weights.pt"
+            self.steps_per_epoch = len(sampler)
+            self.patience_steps = (
+                config.early_stopping_patience_epochs * self.steps_per_epoch
+            )
 
         def on_train_epoch_start(self, trainer: Any, pl_module: Any) -> None:
             sampler.set_epoch(trainer.current_epoch)
@@ -231,8 +266,27 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 pl_module.log_dict(metrics, logger=True)
                 print(json.dumps({"step": trainer.global_step, **metrics}), flush=True)
 
+            if (
+                trainer.global_step
+                and trainer.global_step % config.validation_interval_steps == 0
+                and trainer.global_step != self.last_validation_step
+            ):
+                include_bible = (
+                    trainer.global_step % config.bible_validation_interval_steps == 0
+                )
+                self._validate(trainer, pl_module, include_bible=include_bible)
+
         def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+            if trainer.global_step != self.last_validation_step:
+                self._validate(trainer, pl_module, include_bible=True)
+
+        def _validate(
+            self, trainer: Any, pl_module: Any, *, include_bible: bool
+        ) -> None:
             _disable_prediction_logging(pl_module)
+            names = ["waxal", "fleurs"]
+            if include_bible:
+                names.append("bible")
             results = {
                 name: evaluate_manifest(
                     pl_module,
@@ -240,8 +294,9 @@ def train(config: TrainConfig) -> dict[str, Any]:
                     name=name,
                     batch_size=config.validation_batch_size,
                     output_dir=config.output_dir,
+                    limit=config.validation_limit,
                 )
-                for name in ("waxal", "fleurs", "bible")
+                for name in names
             }
             metrics = {
                 f"validation/{name}/{metric}": value
@@ -253,23 +308,32 @@ def train(config: TrainConfig) -> dict[str, Any]:
             ) / 2
             metrics["validation/selection_wer"] = selection
             comet.log_metrics(metrics, step=trainer.global_step)
-            (config.output_dir / "validation.json").write_text(
-                json.dumps({"selection_wer": selection, "datasets": results}, indent=2)
-                + "\n",
-                encoding="utf-8",
-            )
+            with (config.output_dir / "validation-history.jsonl").open(
+                "a", encoding="utf-8"
+            ) as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "step": trainer.global_step,
+                            "selection_wer": selection,
+                            "datasets": results,
+                        }
+                    )
+                    + "\n"
+                )
             if selection < self.best_score:
                 self.best_score = selection
-                self.bad_epochs = 0
                 state = {
                     key: value.detach().cpu()
                     for key, value in pl_module.state_dict().items()
                 }
                 torch.save(state, self.best_path)
-            else:
-                self.bad_epochs += 1
-                if self.bad_epochs >= config.early_stopping_patience:
-                    trainer.should_stop = True
+            if selection <= self.meaningful_best - config.early_stopping_min_delta:
+                self.meaningful_best = selection
+                self.last_meaningful_step = trainer.global_step
+            elif trainer.global_step - self.last_meaningful_step >= self.patience_steps:
+                trainer.should_stop = True
+            self.last_validation_step = trainer.global_step
 
     callback = ExperimentCallback()
     trainer = pl.Trainer(
@@ -327,9 +391,13 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--warmup-ratio", type=float, default=0.1)
     result.add_argument("--num-workers", type=int, default=2)
     result.add_argument("--validation-batch-size", type=int, default=16)
-    result.add_argument("--early-stopping-patience", type=int, default=2)
+    result.add_argument("--validation-interval-steps", type=int, default=2000)
+    result.add_argument("--bible-validation-interval-steps", type=int, default=10_000)
+    result.add_argument("--early-stopping-patience-epochs", type=int, default=2)
+    result.add_argument("--early-stopping-min-delta", type=float, default=0.001)
     result.add_argument("--exposure-interval", type=int, default=1000)
     result.add_argument("--limit-train-batches", type=int)
+    result.add_argument("--validation-limit", type=int)
     return result
 
 
