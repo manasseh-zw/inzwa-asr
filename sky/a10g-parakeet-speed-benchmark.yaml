@@ -44,6 +44,5 @@ run: |
     --output-prefix "$OUTPUT_PREFIX" \
     --model-uri "$MODEL_URI" \
     --model-sha256 "$MODEL_SHA256" \
-    --batch-sizes 1 2 4 8 16 \
-    --preflight-minutes 20 \
+    --preflight-result "$BENCH_ROOT/results/parakeet-preflight.json" \
     --repetitions 3

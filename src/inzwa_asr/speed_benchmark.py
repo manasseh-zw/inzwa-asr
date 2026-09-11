@@ -16,7 +16,7 @@ from typing import Any, Protocol
 
 import soundfile
 
-from .evaluation import read_evaluation_manifest
+from .evaluation import read_evaluation_manifest, score
 from .release import file_sha256, parse_s3_uri
 from .sunbird_evaluation import MODEL_ID as SUNBIRD_MODEL_ID
 from .sunbird_evaluation import MODEL_REVISION as SUNBIRD_MODEL_REVISION
@@ -73,6 +73,7 @@ def build_manifest(
                 "audio_filepath": str(row["audio_filepath"]),
                 "source": source,
                 "duration": _duration(str(row["audio_filepath"])),
+                "text": str(row["text"]),
             }
             for row in source_rows
         ]
@@ -169,6 +170,11 @@ def _run_pass(
         "audio_hours_per_hour": audio_seconds / elapsed,
         "peak_vram_gib": torch.cuda.max_memory_allocated() / 1024**3,
         "hypothesis_sha256": _digest(hypotheses),
+        "metrics": (
+            score([str(row["text"]) for row in ordered], hypotheses)
+            if all("text" in row for row in ordered)
+            else None
+        ),
     }
 
 
@@ -278,33 +284,47 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     backend.transcribe([row["audio_filepath"] for row in warmup], len(warmup))
     preflight = _preflight_rows(rows, args.preflight_minutes * 60)
     candidates = []
-    reference_digest = None
-    for batch_size in args.batch_sizes:
-        try:
-            result = _run_pass(backend, preflight, batch_size)
-            if reference_digest is None:
-                reference_digest = result["hypothesis_sha256"]
-            result["outputs_match_reference"] = (
-                result["hypothesis_sha256"] == reference_digest
-            )
-            candidates.append({"batch_size": batch_size, "status": "ok", **result})
-        except RuntimeError as error:
-            if "out of memory" not in str(error).lower():
-                raise
-            candidates.append(
-                {"batch_size": batch_size, "status": "oom", "error": str(error)}
-            )
-            import torch
+    if args.preflight_result:
+        frozen = json.loads(args.preflight_result.read_text(encoding="utf-8"))
+        if frozen["backend"] != args.backend:
+            raise RuntimeError("Preflight backend does not match benchmark backend")
+        if frozen["manifest_sha256"] != file_sha256(args.manifest):
+            raise RuntimeError("Preflight manifest does not match benchmark manifest")
+        candidates = frozen["preflight"]
+        selected_batch_size = int(frozen["selected_batch_size"])
+    else:
+        reference_digest = None
+        for batch_size in args.batch_sizes:
+            try:
+                result = _run_pass(backend, preflight, batch_size)
+                if reference_digest is None:
+                    reference_digest = result["hypothesis_sha256"]
+                result["outputs_match_reference"] = (
+                    result["hypothesis_sha256"] == reference_digest
+                )
+                candidates.append({"batch_size": batch_size, "status": "ok", **result})
+            except RuntimeError as error:
+                if "out of memory" not in str(error).lower():
+                    raise
+                candidates.append(
+                    {"batch_size": batch_size, "status": "oom", "error": str(error)}
+                )
+                import torch
 
-            torch.cuda.empty_cache()
-    eligible = [
-        item
-        for item in candidates
-        if item["status"] == "ok" and item["outputs_match_reference"]
-    ]
-    if not eligible:
-        raise RuntimeError("No batch size passed the speed preflight")
-    selected_batch_size = min(eligible, key=lambda item: item["rtf"])["batch_size"]
+                torch.cuda.empty_cache()
+        successful = [item for item in candidates if item["status"] == "ok"]
+        if not successful:
+            raise RuntimeError("No batch size passed the speed preflight")
+        if all(item["metrics"] is not None for item in successful):
+            best_wer = min(item["metrics"]["wer"] for item in successful)
+            eligible = [
+                item
+                for item in successful
+                if item["metrics"]["wer"] <= best_wer + args.wer_tolerance
+            ]
+        else:
+            eligible = [item for item in successful if item["outputs_match_reference"]]
+        selected_batch_size = min(eligible, key=lambda item: item["rtf"])["batch_size"]
     if args.preflight_only:
         summary = {
             "status": "preflight_complete",
@@ -320,6 +340,10 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "preflight_audio_minutes": sum(row["duration"] for row in preflight) / 60,
             "preflight": candidates,
             "selected_batch_size": selected_batch_size,
+            "selection_rule": (
+                "fastest candidate within normalized WER tolerance of best candidate"
+            ),
+            "wer_tolerance": args.wer_tolerance,
         }
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -398,6 +422,8 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--batch-sizes", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     run.add_argument("--preflight-minutes", type=float, default=20.0)
     run.add_argument("--preflight-only", action="store_true")
+    run.add_argument("--preflight-result", type=Path)
+    run.add_argument("--wer-tolerance", type=float, default=0.001)
     run.add_argument("--warmup-rows", type=int, default=8)
     run.add_argument("--repetitions", type=int, default=3)
     return result

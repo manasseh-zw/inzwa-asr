@@ -39,4 +39,5 @@ def test_build_manifest_is_deterministic_and_has_no_duplicates(tmp_path: Path) -
     assert first_rows == second_rows
     assert len({row["id"] for row in first_rows}) == len(first_rows)
     assert {row["source"] for row in first_rows} == set(SOURCES)
+    assert {row["text"] for row in first_rows} == {"test"}
     assert first_metadata["audio_hours"] == second_metadata["audio_hours"]

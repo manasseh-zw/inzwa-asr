@@ -32,6 +32,5 @@ run: |
     --work-root "$BENCH_ROOT" \
     --output "$BENCH_ROOT/results/sunbird-213531767f739bc5.json" \
     --output-prefix "$OUTPUT_PREFIX" \
-    --batch-sizes 1 2 4 8 16 \
-    --preflight-minutes 20 \
+    --preflight-result "$BENCH_ROOT/results/sunbird-preflight.json" \
     --repetitions 3
