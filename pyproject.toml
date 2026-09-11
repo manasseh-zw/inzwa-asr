@@ -48,6 +48,7 @@ inzwa-train = "inzwa_asr.training:main"
 inzwa-evaluate = "inzwa_asr.test_evaluation:main"
 inzwa-export = "inzwa_asr.export_model:main"
 inzwa-evaluate-sunbird = "inzwa_asr.sunbird_evaluation:main"
+inzwa-speed-benchmark = "inzwa_asr.speed_benchmark:main"
 
 [build-system]
 requires = ["hatchling"]

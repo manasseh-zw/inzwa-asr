@@ -132,6 +132,22 @@ dataset revision, decodes at the recorded sample rate, explicitly resamples to
 CER. The private curated-150 set remains a separate robustness evaluation and
 is not part of the reproducible public score.
 
+## Speed benchmark
+
+`inzwa-speed-benchmark` builds the frozen `shona-speed-v1` six-hour manifest
+from the materialized WAXAL, FLEURS, Bible, and curated-150 evaluation audio.
+It includes curated audio once, divides the remaining duration equally across
+the three public domains, and never duplicates clips. The manifest, its source
+totals, seed, and checksum are uploaded before timing.
+
+The A10G tasks in `sky/a10g-*-speed-benchmark.yaml` use the same instance type.
+Each backend receives one untimed warm-up, a 20-minute batch-size sweep, and
+three complete six-hour repetitions. Only batch sizes that reproduce the
+batch-one hypothesis digest are eligible. Results include model-load time,
+end-to-end real-time factor, audio-hours per wall-clock hour, wall time, peak
+VRAM, selected batch size, model revision, and manifest checksum. Audio is
+ordered by duration to measure padding-efficient offline throughput.
+
 ## License
 
 No license has been added yet. The repository code is newly written, but the

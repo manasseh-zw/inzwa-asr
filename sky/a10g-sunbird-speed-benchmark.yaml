@@ -1,0 +1,37 @@
+name: inzwa-a10g-sunbird-speed-benchmark
+
+resources:
+  cloud: aws
+  region: us-east-1
+  instance_type: g5.xlarge
+  accelerators: A10G:1
+  disk_size: 100
+
+workdir: .
+
+envs:
+  AWS_REGION: us-east-1
+  BENCH_ROOT: /home/ubuntu/inzwa-speed-v1
+  OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/benchmarks/shona-speed-v1
+
+setup: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env"
+  uv sync --frozen --extra sunbird
+
+run: |
+  set -euo pipefail
+  source "$HOME/.local/bin/env"
+  uv sync --frozen --extra sunbird
+  uv run python -c "from huggingface_hub import hf_hub_download; print(hf_hub_download('Sunbird/asr-whisper-51-african-languages', 'config.json', revision='213531767f739bc5b1e5dcb3e2ec9e112674ab67'))"
+  mkdir -p "$BENCH_ROOT/results"
+  test -f "$BENCH_ROOT/manifest.jsonl"
+  uv run inzwa-speed-benchmark run \
+    --backend sunbird \
+    --manifest "$BENCH_ROOT/manifest.jsonl" \
+    --work-root "$BENCH_ROOT" \
+    --output "$BENCH_ROOT/results/sunbird-213531767f739bc5.json" \
+    --output-prefix "$OUTPUT_PREFIX" \
+    --batch-sizes 1 2 4 8 16 \
+    --preflight-minutes 20 \
+    --repetitions 3
