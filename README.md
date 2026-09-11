@@ -5,6 +5,9 @@ Inzwa ASR is the training code for an open Shona speech recognizer based on
 This repository contains the reproducible training path. Corpus construction,
 private evaluation data, and historical experiments are intentionally kept out.
 
+See [MODEL_PROFILE.md](MODEL_PROFILE.md) for the selected checkpoint's frozen
+test results, training provenance, and A10G inference benchmark.
+
 The first baseline trains on 82,110 examples, or 331.86 hours, and validates on
 4,307 named examples. It uses the natural release mixture without source
 weighting, oversampling, quality weighting, or a curriculum.
@@ -141,12 +144,12 @@ the three public domains, and never duplicates clips. The manifest, its source
 totals, seed, and checksum are uploaded before timing.
 
 The A10G tasks in `sky/a10g-*-speed-benchmark.yaml` use the same instance type.
-Each backend receives one untimed warm-up, a 20-minute batch-size sweep, and
-three complete six-hour repetitions. Only batch sizes that reproduce the
-batch-one hypothesis digest are eligible. Results include model-load time,
-end-to-end real-time factor, audio-hours per wall-clock hour, wall time, peak
-VRAM, selected batch size, model revision, and manifest checksum. Audio is
-ordered by duration to measure padding-efficient offline throughput.
+The recorded comparison used batch size 16 for both backends. Inzwa completed
+three six-hour repetitions; Sunbird completed one. Results include model-load
+time, end-to-end real-time factor, audio-hours per wall-clock hour, wall time,
+peak VRAM, model revision, and manifest checksum. Audio is ordered by duration
+to measure padding-efficient offline throughput. The current tasks use native
+framework inference without a separate optimization engine.
 
 ## License
 
