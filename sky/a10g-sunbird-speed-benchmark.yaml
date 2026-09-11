@@ -30,6 +30,6 @@ run: |
     --backend sunbird \
     --manifest "$BENCH_ROOT/manifest.jsonl" \
     --work-root "$BENCH_ROOT" \
-    --output "$BENCH_ROOT/results/sunbird-213531767f739bc5.json" \
-    --preflight-result "$BENCH_ROOT/results/sunbird-preflight.json" \
-    --repetitions 3
+    --output "$BENCH_ROOT/results/sunbird-213531767f739bc5-batch16-one-pass.json" \
+    --selected-batch-size 16 \
+    --repetitions 1

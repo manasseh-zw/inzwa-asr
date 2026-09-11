@@ -284,7 +284,9 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     backend.transcribe([row["audio_filepath"] for row in warmup], len(warmup))
     preflight = _preflight_rows(rows, args.preflight_minutes * 60)
     candidates = []
-    if args.preflight_result:
+    if args.selected_batch_size:
+        selected_batch_size = args.selected_batch_size
+    elif args.preflight_result:
         frozen = json.loads(args.preflight_result.read_text(encoding="utf-8"))
         if frozen["backend"] != args.backend:
             raise RuntimeError("Preflight backend does not match benchmark backend")
@@ -423,6 +425,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--preflight-minutes", type=float, default=20.0)
     run.add_argument("--preflight-only", action="store_true")
     run.add_argument("--preflight-result", type=Path)
+    run.add_argument("--selected-batch-size", type=int)
     run.add_argument("--wer-tolerance", type=float, default=0.001)
     run.add_argument("--warmup-rows", type=int, default=8)
     run.add_argument("--repetitions", type=int, default=3)
