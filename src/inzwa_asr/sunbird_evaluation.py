@@ -39,7 +39,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
 
     root = args.work_root.resolve()
     output = root / "sunbird-results"
-    output.mkdir(parents=True, exist_ok=False)
+    output.mkdir(parents=True, exist_ok=True)
+    if (output / "summary.json").exists():
+        raise RuntimeError(f"Completed output already exists: {output}")
     bucket = boto3.client("sts").get_caller_identity()["Account"]
     if bucket != "102431378819":
         raise RuntimeError(f"Unexpected AWS account: {bucket}")
@@ -71,55 +73,77 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     results: dict[str, Any] = {}
     for name, manifest in manifests.items():
         rows = read_evaluation_manifest(manifest)
-        hypotheses: list[str] = []
-        for start in range(0, len(rows), args.batch_size):
-            batch = rows[start : start + args.batch_size]
-            inputs = processor(
-                [_load_audio(str(row["audio_filepath"])) for row in batch],
-                sampling_rate=SAMPLE_RATE,
-                do_normalize=True,
-                return_tensors="pt",
-                padding=True,
-            )
-            inputs = {
-                key: (
-                    value.to(device=device, dtype=dtype)
-                    if torch.is_floating_point(value)
-                    else value.to(device)
+        prediction_path = output / f"predictions-{name}.jsonl"
+        predictions: dict[str, str] = {}
+        if prediction_path.exists():
+            for line in prediction_path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    record = json.loads(line)
+                    predictions[str(record["id"])] = str(record["hypothesis"])
+        pending = [row for row in rows if str(row["id"]) not in predictions]
+        with prediction_path.open("a", encoding="utf-8") as handle:
+            for start in range(0, len(pending), args.batch_size):
+                batch = pending[start : start + args.batch_size]
+                inputs = processor(
+                    [_load_audio(str(row["audio_filepath"])) for row in batch],
+                    sampling_rate=SAMPLE_RATE,
+                    do_normalize=True,
+                    return_tensors="pt",
+                    padding=True,
                 )
-                for key, value in inputs.items()
-            }
-            with torch.inference_mode():
-                predicted = model.generate(
-                    **inputs,
-                    forced_decoder_ids=forced_decoder_ids,
-                    num_beams=1,
-                    do_sample=False,
-                    max_new_tokens=256,
-                )
-            hypotheses.extend(
-                processor.batch_decode(
+                inputs = {
+                    key: (
+                        value.to(device=device, dtype=dtype)
+                        if torch.is_floating_point(value)
+                        else value.to(device)
+                    )
+                    for key, value in inputs.items()
+                }
+                with torch.inference_mode():
+                    predicted = model.generate(
+                        **inputs,
+                        forced_decoder_ids=forced_decoder_ids,
+                        num_beams=1,
+                        do_sample=False,
+                        max_new_tokens=256,
+                    )
+                batch_hypotheses = processor.batch_decode(
                     predicted,
                     skip_special_tokens=True,
                     clean_up_tokenization_spaces=False,
                 )
+                for row, hypothesis in zip(batch, batch_hypotheses, strict=True):
+                    row_id = str(row["id"])
+                    predictions[row_id] = hypothesis
+                    handle.write(
+                        json.dumps(
+                            {
+                                "id": row_id,
+                                "reference": row["text"],
+                                "hypothesis": hypothesis,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
+                handle.flush()
+                print(
+                    json.dumps(
+                        {
+                            "dataset": name,
+                            "completed": len(predictions),
+                            "total": len(rows),
+                        }
+                    ),
+                    flush=True,
+                )
+        hypotheses = [predictions[str(row["id"])] for row in rows]
+        if len(hypotheses) != len(rows):
+            raise RuntimeError(
+                f"Incomplete {name} predictions: {len(hypotheses)}/{len(rows)}"
             )
         references = [str(row["text"]) for row in rows]
         metrics = score(references, hypotheses)
-        prediction_path = output / f"predictions-{name}.jsonl"
-        with prediction_path.open("w", encoding="utf-8") as handle:
-            for row, hypothesis in zip(rows, hypotheses, strict=True):
-                handle.write(
-                    json.dumps(
-                        {
-                            "id": row["id"],
-                            "reference": row["text"],
-                            "hypothesis": hypothesis,
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
         results[name] = {
             "name": f"test-{name}",
             "rows": len(rows),
