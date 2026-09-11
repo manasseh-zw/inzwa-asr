@@ -32,6 +32,8 @@ setup: |
 run: |
   set -euo pipefail
   source "$HOME/.local/bin/env"
+  uv sync --frozen --extra train
+  uv run python -c "from bitsandbytes.optim import AdamW8bit; print(AdamW8bit)"
   test -w "$HOME"
   mkdir -p "$HOME/job-logs"
   JOB_LOG="$HOME/job-logs/$RUN_ID.log"

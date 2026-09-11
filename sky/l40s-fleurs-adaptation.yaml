@@ -27,6 +27,7 @@ setup: |
 run: |
   set -euo pipefail
   source "$HOME/.local/bin/env"
+  uv sync --frozen --extra train
   test -w /data
   uv run inzwa-release verify "$RELEASE_ROOT"
   uv run inzwa-train \
