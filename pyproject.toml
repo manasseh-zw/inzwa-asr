@@ -17,6 +17,7 @@ data = [
     "pyarrow>=18,<20",
 ]
 train = [
+    "bitsandbytes>=0.46,<1",
     "comet-ml>=3.47,<4",
     "jiwer>=3.1,<4",
     "lightning>=2.4,<3",

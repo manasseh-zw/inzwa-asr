@@ -113,6 +113,9 @@ has only 16 GB of host RAM. Its tasks therefore finish weights-only training,
 exit to release trainer memory, and perform NeMo export in a fresh process.
 They also use zero loader workers and smaller validation batches; neither
 changes the examples, gradients, checkpoint objective, or resulting weights.
+The A10G path uses 8-bit AdamW optimizer states to leave enough VRAM for the
+RNNT/TDT loss on long utterances. Its smoke test deliberately trains on the ten
+longest FLEURS examples before the full corpus is allowed to run.
 The adaptation uses a `3e-6` learning rate and FLEURS-validation early stopping.
 It still logs WAXAL validation so later checkpoint interpolation can be selected
 on the equal WAXAL/FLEURS validation mean. Test and curated data remain

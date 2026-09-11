@@ -18,8 +18,8 @@ envs:
   COMET_API_KEY_FILE: /home/ubuntu/.config/teleagents/comet.env
   COMET_PROJECT_NAME: inzwa-asr
   RELEASE_ROOT: /home/ubuntu/inzwa-release-v2
-  RUN_ID: fleurs-adaptation-lr3e6-20260909a
-  S3_OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/adaptation/fleurs-adaptation-lr3e6-20260909a
+  RUN_ID: fleurs-adaptation-lr3e6-8bit-20260911a
+  S3_OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/adaptation/fleurs-adaptation-lr3e6-8bit-20260911a
   INITIAL_MODEL_URI: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/runs/full-corpus-v2-seed42-20260909a/inzwa-parakeet-tdt-0.6b-v3.nemo
   INITIAL_MODEL_SHA256: 08bb22eb1050f165529c25d9306c45679b10e54a9b6c568a113e33622b3a8da1
 
@@ -30,6 +30,7 @@ setup: |
   uv run python -c "import nemo.collections.asr; import numba; import numpy"
 
 run: |
+  set -euo pipefail
   source "$HOME/.local/bin/env"
   test -w "$HOME"
   mkdir -p "$HOME/job-logs"
@@ -54,6 +55,7 @@ run: |
     --initial-model-sha256 "$INITIAL_MODEL_SHA256" \
     --train-source fleurs \
     --selection-objective fleurs \
+    --optimizer adamw8bit \
     --learning-rate 3e-6 \
     --batch-size 1 \
     --num-workers 0 \

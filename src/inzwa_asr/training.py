@@ -54,6 +54,8 @@ class TrainConfig:
     selection_objective: str = "mean"
     max_steps: int = -1
     defer_final_model_export: bool = False
+    optimizer: str = "adamw"
+    longest_train_examples: int | None = None
 
 
 def _git_commit() -> str:
@@ -112,6 +114,16 @@ def _learning_rate(trainer: Any) -> float | None:
     if not trainer.optimizers:
         return None
     return float(trainer.optimizers[0].param_groups[0]["lr"])
+
+
+def _select_longest_rows(
+    rows: list[dict[str, Any]], limit: int | None
+) -> list[dict[str, Any]]:
+    if limit is None:
+        return rows
+    if limit < 1:
+        raise ValueError("longest_train_examples must be positive")
+    return sorted(rows, key=lambda row: float(row["duration"]), reverse=True)[:limit]
 
 
 def _resolve_model(model_id: str, revision: str, cache: Path) -> tuple[Path, str]:
@@ -196,6 +208,8 @@ def train(config: TrainConfig) -> dict[str, Any]:
         raise ValueError("early_stopping_min_delta must not be negative")
     if config.selection_objective not in {"mean", "fleurs"}:
         raise ValueError("selection_objective must be 'mean' or 'fleurs'")
+    if config.optimizer not in {"adamw", "adamw8bit"}:
+        raise ValueError("optimizer must be 'adamw' or 'adamw8bit'")
     release = verify_release(config.release_root, require_complete=True)
     if not release["train_ready"]:
         raise RuntimeError("The full release did not pass verification")
@@ -248,6 +262,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
                 "Source-filtered manifest contains unexpected sources: "
                 f"{unexpected_sources}"
             )
+    train_rows = _select_longest_rows(train_rows, config.longest_train_examples)
     sampler = DurationBatchSampler(
         train_rows,
         max_batch_duration=config.max_batch_duration,
@@ -282,19 +297,26 @@ def train(config: TrainConfig) -> dict[str, Any]:
         collate_fn=dataset.collate_fn,
         persistent_workers=config.num_workers > 0,
     )
-    model.cfg.optim = OmegaConf.create(
-        {
-            "name": "adamw",
-            "lr": config.learning_rate,
-            "betas": [0.9, 0.98],
-            "weight_decay": 0.001,
-            "sched": {
-                "name": "CosineAnnealing",
-                "warmup_ratio": config.warmup_ratio,
-                "min_lr": 1e-6,
-            },
-        }
-    )
+    optim_config = {
+        "lr": config.learning_rate,
+        "betas": [0.9, 0.98],
+        "weight_decay": 0.001,
+        "sched": {
+            "name": "CosineAnnealing",
+            "warmup_ratio": config.warmup_ratio,
+            "min_lr": 1e-6,
+        },
+    }
+    if config.optimizer == "adamw8bit":
+        optim_config.update(
+            {
+                "_target_": "bitsandbytes.optim.AdamW8bit",
+                "min_8bit_size": 4096,
+            }
+        )
+    else:
+        optim_config["name"] = "adamw"
+    model.cfg.optim = OmegaConf.create(optim_config)
     comet = CometLogger(
         project_name=os.environ.get("COMET_PROJECT_NAME", "inzwa-asr"),
         workspace=os.environ.get("COMET_WORKSPACE") or None,
@@ -310,6 +332,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
         "model_revision": resolved_revision,
         "initial_model_uri": config.initial_model_uri,
         "initial_model_sha256": config.initial_model_sha256,
+        "optimizer": config.optimizer,
         "seed": config.seed,
         "sampler": {
             "type": "deterministic-sortish-duration-batching",
@@ -318,6 +341,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
             "sort_window": config.sort_window,
             "natural_mixture": True,
             "train_source": config.train_source,
+            "longest_train_examples": config.longest_train_examples,
         },
         "validation": {
             "selection_datasets": ["waxal", "fleurs"],
@@ -566,6 +590,8 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--max-steps", type=int, default=-1)
     result.add_argument("--defer-final-model-export", action="store_true")
+    result.add_argument("--optimizer", choices=("adamw", "adamw8bit"), default="adamw")
+    result.add_argument("--longest-train-examples", type=int)
     return result
 
 

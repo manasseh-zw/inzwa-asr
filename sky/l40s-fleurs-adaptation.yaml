@@ -25,6 +25,7 @@ setup: |
   uv run python -c "import nemo.collections.asr; import numba; import numpy"
 
 run: |
+  set -euo pipefail
   source "$HOME/.local/bin/env"
   test -w /data
   uv run inzwa-release verify "$RELEASE_ROOT"

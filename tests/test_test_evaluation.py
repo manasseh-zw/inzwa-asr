@@ -5,7 +5,7 @@ import pytest
 from inzwa_asr.evaluation import read_evaluation_manifest
 from inzwa_asr.export_model import export_model
 from inzwa_asr.test_evaluation import _column
-from inzwa_asr.training import TrainConfig
+from inzwa_asr.training import TrainConfig, _select_longest_rows
 
 
 def test_column_selects_first_supported_name() -> None:
@@ -52,3 +52,13 @@ def test_adaptation_configuration_is_explicit(tmp_path: Path) -> None:
 def test_deferred_export_requires_training_artifacts(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="config.json"):
         export_model(tmp_path, "s3://bucket/run")
+
+
+def test_longest_example_smoke_selection() -> None:
+    rows = [
+        {"id": "short", "duration": 4.0},
+        {"id": "longest", "duration": 53.4},
+        {"id": "long", "duration": 38.82},
+    ]
+    selected = _select_longest_rows(rows, 2)
+    assert [row["id"] for row in selected] == ["longest", "long"]
