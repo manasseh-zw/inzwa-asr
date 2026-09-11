@@ -8,6 +8,10 @@ private evaluation data, and historical experiments are intentionally kept out.
 See [MODEL_PROFILE.md](MODEL_PROFILE.md) for the selected checkpoint's frozen
 test results, training provenance, and A10G inference benchmark.
 
+The provisional Hugging Face model card lives in `release/model/`. The
+CPU-only `sky/publish-private-model.yaml` task assembles the checksum-pinned
+model package from S3 and uploads it to a private Hub repository with Xet.
+
 The first baseline trains on 82,110 examples, or 331.86 hours, and validates on
 4,307 named examples. It uses the natural release mixture without source
 weighting, oversampling, quality weighting, or a curriculum.
