@@ -26,6 +26,13 @@ train = [
     "numba-cuda[cu12]==0.15.1",
     "pyarrow>=18,<20",
 ]
+sunbird = [
+    "accelerate==1.12.0",
+    "huggingface-hub>=1.27,<2",
+    "pyarrow>=18,<20",
+    "torch==2.9.1",
+    "transformers==5.6.0",
+]
 
 [dependency-groups]
 dev = [
@@ -39,6 +46,7 @@ inzwa-preflight = "inzwa_asr.preflight:main"
 inzwa-train = "inzwa_asr.training:main"
 inzwa-evaluate = "inzwa_asr.test_evaluation:main"
 inzwa-export = "inzwa_asr.export_model:main"
+inzwa-evaluate-sunbird = "inzwa_asr.sunbird_evaluation:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -56,3 +64,11 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "train" },
+        { extra = "sunbird" },
+    ],
+]
