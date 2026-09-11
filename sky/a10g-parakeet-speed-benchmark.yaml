@@ -41,7 +41,6 @@ run: |
     --manifest "$BENCH_ROOT/manifest.jsonl" \
     --work-root "$BENCH_ROOT" \
     --output "$BENCH_ROOT/results/parakeet-step5750.json" \
-    --output-prefix "$OUTPUT_PREFIX" \
     --model-uri "$MODEL_URI" \
     --model-sha256 "$MODEL_SHA256" \
     --preflight-result "$BENCH_ROOT/results/parakeet-preflight.json" \

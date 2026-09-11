@@ -31,6 +31,5 @@ run: |
     --manifest "$BENCH_ROOT/manifest.jsonl" \
     --work-root "$BENCH_ROOT" \
     --output "$BENCH_ROOT/results/sunbird-213531767f739bc5.json" \
-    --output-prefix "$OUTPUT_PREFIX" \
     --preflight-result "$BENCH_ROOT/results/sunbird-preflight.json" \
     --repetitions 3
