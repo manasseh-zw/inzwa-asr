@@ -1,5 +1,8 @@
 name: inzwa-a10g-sunbird-test-evaluation
 
+file_mounts:
+  /home/ubuntu/.cache/huggingface/token: /Users/manasseh/.cache/huggingface/token
+
 resources:
   cloud: aws
   region: us-east-1
@@ -23,6 +26,7 @@ run: |
   source "$HOME/.local/bin/env"
   uv sync --frozen --extra sunbird
   uv run python -c "import torch, transformers; print({'cuda': torch.cuda.get_device_name(0), 'transformers': transformers.__version__})"
+  uv run python -c "from huggingface_hub import hf_hub_download; print(hf_hub_download('Sunbird/asr-whisper-51-african-languages', 'config.json', revision='213531767f739bc5b1e5dcb3e2ec9e112674ab67'))"
   uv run inzwa-evaluate-sunbird \
     --work-root "$HOME/inzwa-test-step5750-v1" \
     --output-prefix "$OUTPUT_PREFIX" \
