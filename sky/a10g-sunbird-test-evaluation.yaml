@@ -1,8 +1,5 @@
 name: inzwa-a10g-sunbird-test-evaluation
 
-file_mounts:
-  /home/ubuntu/.cache/huggingface/token: /Users/manasseh/.cache/huggingface/token
-
 resources:
   cloud: aws
   region: us-east-1
