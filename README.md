@@ -108,13 +108,15 @@ test and private data out of checkpoint selection.
 
 The optional FLEURS adaptation starts from the selected full-corpus model and
 uses only FLEURS train. A 10-step smoke test is required before the full task.
-In practice, a `g5.xlarge` A10G completes batch-size-1 training but its 16 GB of
-host RAM is insufficient for reliable checkpoint finalization and NeMo export;
-use the L40S tasks on `g6e.xlarge` for the release run. The adaptation uses a
-`3e-6` learning rate and FLEURS-validation early stopping. It still logs WAXAL
-validation so later checkpoint interpolation can be selected on the equal
-WAXAL/FLEURS validation mean. Test and curated data remain inaccessible to
-training and interpolation selection.
+On a `g5.xlarge`, the A10G has enough VRAM for batch-size-1 training but the VM
+has only 16 GB of host RAM. Its tasks therefore finish weights-only training,
+exit to release trainer memory, and perform NeMo export in a fresh process.
+They also use zero loader workers and smaller validation batches; neither
+changes the examples, gradients, checkpoint objective, or resulting weights.
+The adaptation uses a `3e-6` learning rate and FLEURS-validation early stopping.
+It still logs WAXAL validation so later checkpoint interpolation can be selected
+on the equal WAXAL/FLEURS validation mean. Test and curated data remain
+inaccessible to training and interpolation selection.
 
 Before the private pass, `sky/stage-curated-150.yaml` mirrors the frozen
 `manassehzw/sna-manasseh-150-raw` revision into S3 and writes a checksum-bearing

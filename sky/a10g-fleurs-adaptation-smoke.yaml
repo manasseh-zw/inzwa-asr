@@ -18,8 +18,8 @@ envs:
   COMET_API_KEY_FILE: /home/ubuntu/.config/teleagents/comet.env
   COMET_PROJECT_NAME: inzwa-asr
   RELEASE_ROOT: /home/ubuntu/inzwa-release-v2
-  RUN_ID: fleurs-adaptation-smoke-20260909b
-  S3_OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/adaptation/fleurs-adaptation-smoke-20260909b
+  RUN_ID: fleurs-adaptation-smoke-20260911a
+  S3_OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/adaptation/fleurs-adaptation-smoke-20260911a
   INITIAL_MODEL_URI: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/runs/full-corpus-v2-seed42-20260909a/inzwa-parakeet-tdt-0.6b-v3.nemo
   INITIAL_MODEL_SHA256: 08bb22eb1050f165529c25d9306c45679b10e54a9b6c568a113e33622b3a8da1
 
@@ -57,7 +57,13 @@ run: |
     --selection-objective fleurs \
     --learning-rate 3e-6 \
     --batch-size 1 \
+    --num-workers 0 \
+    --validation-batch-size 4 \
     --max-steps 10 \
     --validation-interval-steps 5 \
     --bible-validation-interval-steps 10 \
-    --validation-limit 32
+    --validation-limit 32 \
+    --defer-final-model-export
+  uv run inzwa-export \
+    --output-dir "$HOME/runs/$RUN_ID" \
+    --output-prefix "$S3_OUTPUT_PREFIX"

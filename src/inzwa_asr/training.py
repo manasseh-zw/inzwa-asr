@@ -53,6 +53,7 @@ class TrainConfig:
     train_source: str | None = None
     selection_objective: str = "mean"
     max_steps: int = -1
+    defer_final_model_export: bool = False
 
 
 def _git_commit() -> str:
@@ -240,8 +241,7 @@ def train(config: TrainConfig) -> dict[str, Any]:
     train_rows = read_manifest(manifests["train"])
     if config.train_source:
         unexpected_sources = sorted(
-            {str(row["source"]) for row in train_rows}
-            - {config.train_source}
+            {str(row["source"]) for row in train_rows} - {config.train_source}
         )
         if unexpected_sources:
             raise RuntimeError(
@@ -497,6 +497,22 @@ def train(config: TrainConfig) -> dict[str, Any]:
     trainer.fit(model, train_dataloaders=train_loader)
     if not callback.best_path.is_file():
         raise RuntimeError("Training finished without a best weights checkpoint")
+    summary = {
+        "status": ("weights_ready" if config.defer_final_model_export else "complete"),
+        **provenance,
+        "best_selection_wer": callback.best_score,
+        "selected_step": callback.best_step,
+        "best_weights": {
+            "path": str(callback.best_path),
+            "sha256": file_sha256(callback.best_path),
+        },
+    }
+    if config.defer_final_model_export:
+        (config.output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
+        summary["uploaded"] = _upload_artifacts(config.output_dir, config.output_prefix)
+        return summary
     if callback.best_step != trainer.global_step:
         best_state = torch.load(
             callback.best_path, map_location="cpu", weights_only=True
@@ -506,16 +522,9 @@ def train(config: TrainConfig) -> dict[str, Any]:
         gc.collect()
     final_model = config.output_dir / "inzwa-parakeet-tdt-0.6b-v3.nemo"
     model.save_to(str(final_model))
-    summary = {
-        "status": "complete",
-        **provenance,
-        "best_selection_wer": callback.best_score,
-        "selected_step": callback.best_step,
-        "best_weights": {
-            "path": str(callback.best_path),
-            "sha256": file_sha256(callback.best_path),
-        },
-        "final_model": {"path": str(final_model), "sha256": file_sha256(final_model)},
+    summary["final_model"] = {
+        "path": str(final_model),
+        "sha256": file_sha256(final_model),
     }
     (config.output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2) + "\n", encoding="utf-8"
@@ -556,6 +565,7 @@ def parser() -> argparse.ArgumentParser:
         "--selection-objective", choices=("mean", "fleurs"), default="mean"
     )
     result.add_argument("--max-steps", type=int, default=-1)
+    result.add_argument("--defer-final-model-export", action="store_true")
     return result
 
 

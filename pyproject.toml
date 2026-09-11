@@ -37,6 +37,7 @@ inzwa-release = "inzwa_asr.release:main"
 inzwa-preflight = "inzwa_asr.preflight:main"
 inzwa-train = "inzwa_asr.training:main"
 inzwa-evaluate = "inzwa_asr.test_evaluation:main"
+inzwa-export = "inzwa_asr.export_model:main"
 
 [build-system]
 requires = ["hatchling"]

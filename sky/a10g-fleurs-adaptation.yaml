@@ -56,8 +56,14 @@ run: |
     --selection-objective fleurs \
     --learning-rate 3e-6 \
     --batch-size 1 \
+    --num-workers 0 \
+    --validation-batch-size 4 \
     --max-epochs 12 \
     --validation-interval-steps 250 \
     --bible-validation-interval-steps 2000 \
     --early-stopping-patience-epochs 2 \
-    --early-stopping-min-delta 0.001
+    --early-stopping-min-delta 0.001 \
+    --defer-final-model-export
+  uv run inzwa-export \
+    --output-dir "$HOME/runs/$RUN_ID" \
+    --output-prefix "$S3_OUTPUT_PREFIX"
