@@ -305,6 +305,32 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     if not eligible:
         raise RuntimeError("No batch size passed the speed preflight")
     selected_batch_size = min(eligible, key=lambda item: item["rtf"])["batch_size"]
+    if args.preflight_only:
+        summary = {
+            "status": "preflight_complete",
+            "benchmark": BENCHMARK_VERSION,
+            "created_at": datetime.now(UTC).isoformat(),
+            "git_commit": _git_commit(),
+            "backend": args.backend,
+            "model_revision": model_revision,
+            "gpu": __import__("torch").cuda.get_device_name(0),
+            "manifest_sha256": file_sha256(args.manifest),
+            "audio_hours": sum(row["duration"] for row in rows) / 3600,
+            "model_load_seconds": model_load_seconds,
+            "preflight_audio_minutes": sum(row["duration"] for row in preflight) / 60,
+            "preflight": candidates,
+            "selected_batch_size": selected_batch_size,
+        }
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        if args.output_prefix:
+            import boto3
+
+            bucket, prefix = parse_s3_uri(args.output_prefix)
+            boto3.client(
+                "s3", region_name=os.environ.get("AWS_REGION", "us-east-1")
+            ).upload_file(str(args.output), bucket, f"{prefix}/{args.output.name}")
+        return summary
     repetitions = [
         _run_pass(backend, rows, selected_batch_size) for _ in range(args.repetitions)
     ]
@@ -371,6 +397,7 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("--model-sha256")
     run.add_argument("--batch-sizes", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     run.add_argument("--preflight-minutes", type=float, default=20.0)
+    run.add_argument("--preflight-only", action="store_true")
     run.add_argument("--warmup-rows", type=int, default=8)
     run.add_argument("--repetitions", type=int, default=3)
     return result

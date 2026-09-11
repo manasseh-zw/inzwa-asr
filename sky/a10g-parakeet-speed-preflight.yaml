@@ -1,0 +1,49 @@
+name: inzwa-a10g-parakeet-speed-preflight
+
+resources:
+  cloud: aws
+  region: us-east-1
+  instance_type: g5.xlarge
+  accelerators: A10G:1
+  disk_size: 100
+
+workdir: .
+
+envs:
+  AWS_REGION: us-east-1
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  BENCH_ROOT: /home/ubuntu/inzwa-speed-v1
+  TEST_ROOT: /home/ubuntu/inzwa-test-step5750-v1
+  MODEL_URI: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/adaptation/fleurs-adaptation-lr3e6-8bit-20260911a/inzwa-parakeet-tdt-0.6b-v3.nemo
+  MODEL_SHA256: f6510ce38ebb9071eadce047afe7b4964c846833e5a8afc0c87c6d1bdbf1de1f
+  OUTPUT_PREFIX: s3://teleagents-research-102431378819-us-east-1/models/asr/inzwa/benchmarks/shona-speed-v1
+
+setup: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env"
+  uv sync --frozen --extra train
+
+run: |
+  set -euo pipefail
+  source "$HOME/.local/bin/env"
+  uv sync --frozen --extra train
+  mkdir -p "$BENCH_ROOT/results"
+  if [ ! -f "$BENCH_ROOT/manifest.jsonl" ]; then
+    uv run inzwa-speed-benchmark build \
+      --manifest-dir "$TEST_ROOT/manifests" \
+      --output "$BENCH_ROOT/manifest.jsonl" \
+      --target-hours 6 \
+      --seed 42 \
+      --output-prefix "$OUTPUT_PREFIX"
+  fi
+  uv run inzwa-speed-benchmark run \
+    --backend parakeet \
+    --manifest "$BENCH_ROOT/manifest.jsonl" \
+    --work-root "$BENCH_ROOT" \
+    --output "$BENCH_ROOT/results/parakeet-preflight.json" \
+    --output-prefix "$OUTPUT_PREFIX" \
+    --model-uri "$MODEL_URI" \
+    --model-sha256 "$MODEL_SHA256" \
+    --batch-sizes 1 2 4 8 16 \
+    --preflight-minutes 20 \
+    --preflight-only
